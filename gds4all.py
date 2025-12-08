@@ -1,5 +1,5 @@
 import xml.etree.ElementTree as ET
-import sys, glob, os, textwrap
+import sys, glob, os, textwrap, argparse
 from data_types import Conversion, ConversionSimple, ConversionBitfieldEnum, ConversionType, CurrentDataNode, RequestNode, ActuationTestNode, Dtc, DtcFunction, SupportedFunction, Protocol, CommunicationSetup
 
 # used for debugging. set sys.argv to, say, 26, 3, 1. 
@@ -40,8 +40,18 @@ def interactive_select (table, prompt):
 		print('Invalid choice! Try again')
 		return interactive_select(table, prompt)
 
+def load_arguments ():
+	parser = argparse.ArgumentParser(description='GDS4ALL - Parser for Hyundai GDS definitions')
+	parser.add_argument('-i', '--interactive-select', nargs='*', help='Prefill selections with indices', type=int, metavar='N')
+	parser.add_argument('-k', '--kia', help='Use KIA vehicles', action='store_true')
+	args = parser.parse_args()
+	return args
+
 def load_vehicles ():
-	tree = ET.parse('decrypted_xef/vehiclesdata_HME.xml')
+	if args.kia:
+		tree = ET.parse('decrypted_xef/vehiclesdata_KME.xml')
+	else:
+		tree = ET.parse('decrypted_xef/vehiclesdata_HME.xml')
 	root = tree.getroot()
 	vehicles = []
 
@@ -148,7 +158,7 @@ def handle_step (bus, step):
 
 	return False
 
-def main ():
+def main(args):
 	print('loading messages..')
 	load_messages('decrypted_xef/add-ENG.xml')
 	load_messages('decrypted_xef/keyvalue.xml')
@@ -424,6 +434,7 @@ def main ():
 		print('[!] Be advised: more than 1 ECU definition was processed and displayed')
 
 if __name__ == '__main__':
-	if len(sys.argv) > 1:
-		prefilled_interactive_selects = sys.argv[1:]
-	main()
+	args = load_arguments()
+	if args.interactive_select:
+		prefilled_interactive_selects = args.interactive_select
+	main(args)
