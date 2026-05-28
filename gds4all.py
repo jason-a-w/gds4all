@@ -390,6 +390,13 @@ def main(args):
 				]
 			)
 
+			for dtc in dtc_func.dtcs:
+				dtc.description = (
+					collections['dtc'].get(dtc.index)
+					or collections['dtc'].get(dtc.header)
+					or 'No description found'
+				)
+
 			_print('Request: {}'.format(dtc_func.requests[0]), indent=8)
 			for dtc in dtc_func.dtcs:
 				_print('{}'.format(str(dtc)), indent=8)
