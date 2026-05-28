@@ -236,14 +236,22 @@ def main(args):
 		# what the fuck is wrong with them?
 		tester_id = _get(commset, 'testerid', cast_to=int, cast_args=(16,))#.lstrip().split(' ')[0]
 		module_id = _get(commset, 'moduleid', cast_to=int, cast_args=(16,))#.lstrip().split(' ')[0]
-
-		#tester_id = int(tester_id, 16)#None if len(tester_id) == 0 else int(tester_id, 16)
-		#module_id = int(module_id, 16)#None if len(module_id) == 0 else int(module_id, 16)
-
+		inferred_tester_id = None
+		inferred_module_id = None
+		
+		if tester_id is None and protocol in (Protocol.CAN, Protocol.ISO_15765):
+			for requestnode in commset.findall('startcomm/requestnode'):
+				if (requestnode.attrib['request'] != ''):
+					inferred_tester_id = int(requestnode.attrib['request'][1:4], 16)
+					inferred_module_id = int(requestnode.attrib['response'][1:4], 16)
+					break
+		
+		tx_id = tester_id if tester_id is not None else inferred_tester_id
+		rx_id = module_id if tester_id is not None else inferred_module_id
 
 		communication_setup = CommunicationSetup(
-			tx_id=tester_id,
-			rx_id=module_id,
+			tx_id=tx_id,
+			rx_id=rx_id,
 			vss_channel=_get(commset, 'vsschannel'),
 			protocol=protocol,
 			supported_functions=[
