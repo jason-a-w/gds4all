@@ -1,5 +1,5 @@
 import xml.etree.ElementTree as ET
-import sys, glob, os, textwrap
+import sys, glob, os, textwrap, argparse
 from data_types import Conversion, ConversionSimple, ConversionBitfieldEnum, ConversionType, CurrentDataNode, RequestNode, ActuationTestNode, Dtc, DtcFunction, SupportedFunction, Protocol, CommunicationSetup
 
 # used for debugging. set sys.argv to, say, 26, 3, 1. 
@@ -40,8 +40,18 @@ def interactive_select (table, prompt):
 		print('Invalid choice! Try again')
 		return interactive_select(table, prompt)
 
+def load_arguments ():
+	parser = argparse.ArgumentParser(description='GDS4ALL - Parser for Hyundai GDS definitions')
+	parser.add_argument('-i', '--interactive-select', nargs='*', help='Prefill selections with indices', type=int, metavar='N')
+	parser.add_argument('-k', '--kia', help='Use KIA vehicles', action='store_true')
+	args = parser.parse_args()
+	return args
+
 def load_vehicles ():
-	tree = ET.parse('decrypted_xef/vehiclesdata_HME.xml')
+	if args.kia:
+		tree = ET.parse('decrypted_xef/vehiclesdata_KME.xml')
+	else:
+		tree = ET.parse('decrypted_xef/vehiclesdata_HME.xml')
 	root = tree.getroot()
 	vehicles = []
 
@@ -148,7 +158,7 @@ def handle_step (bus, step):
 
 	return False
 
-def main ():
+def main(args):
 	print('loading messages..')
 	load_messages('decrypted_xef/add-ENG.xml')
 	load_messages('decrypted_xef/keyvalue.xml')
@@ -226,14 +236,22 @@ def main ():
 		# what the fuck is wrong with them?
 		tester_id = _get(commset, 'testerid', cast_to=int, cast_args=(16,))#.lstrip().split(' ')[0]
 		module_id = _get(commset, 'moduleid', cast_to=int, cast_args=(16,))#.lstrip().split(' ')[0]
-
-		#tester_id = int(tester_id, 16)#None if len(tester_id) == 0 else int(tester_id, 16)
-		#module_id = int(module_id, 16)#None if len(module_id) == 0 else int(module_id, 16)
-
+		inferred_tester_id = None
+		inferred_module_id = None
+		
+		if tester_id is None and protocol in (Protocol.CAN, Protocol.ISO_15765):
+			for requestnode in commset.findall('startcomm/requestnode'):
+				if (requestnode.attrib['request'] != ''):
+					inferred_tester_id = int(requestnode.attrib['request'][1:4], 16)
+					inferred_module_id = int(requestnode.attrib['response'][1:4], 16)
+					break
+		
+		tx_id = tester_id if tester_id is not None else inferred_tester_id
+		rx_id = module_id if tester_id is not None else inferred_module_id
 
 		communication_setup = CommunicationSetup(
-			tx_id=tester_id,
-			rx_id=module_id,
+			tx_id=tx_id,
+			rx_id=rx_id,
 			vss_channel=_get(commset, 'vsschannel'),
 			protocol=protocol,
 			supported_functions=[
@@ -372,6 +390,13 @@ def main ():
 				]
 			)
 
+			for dtc in dtc_func.dtcs:
+				dtc.description = (
+					collections['dtc'].get(dtc.index)
+					or collections['dtc'].get(dtc.header)
+					or 'No description found'
+				)
+
 			_print('Request: {}'.format(dtc_func.requests[0]), indent=8)
 			for dtc in dtc_func.dtcs:
 				_print('{}'.format(str(dtc)), indent=8)
@@ -424,6 +449,7 @@ def main ():
 		print('[!] Be advised: more than 1 ECU definition was processed and displayed')
 
 if __name__ == '__main__':
-	if len(sys.argv) > 1:
-		prefilled_interactive_selects = sys.argv[1:]
-	main()
+	args = load_arguments()
+	if args.interactive_select:
+		prefilled_interactive_selects = args.interactive_select
+	main(args)
