@@ -1,10 +1,10 @@
 import xml.etree.ElementTree as ET
 import sys, glob, os, textwrap, argparse
-from data_types import _get, get_from_collection, get_message, get_lookup_table, Module, load_collections, load_messages, Conversion, ConversionSimple, ConversionBitfieldEnum, ConversionType, CurrentDataNode, RequestNode, ActuationTestNode, Dtc, DtcFunction, SupportedFunction, Protocol, CommunicationSetup
-
+from data_types import Module
+from utils import _get, get_from_collection, get_message, load_collections, load_messages
 # used for debugging. set sys.argv to, say, 26, 3, 1. 
 # a 2006 2.0 tiburon will be selected: vehicle 26, year 3, variant 1
-prefilled_interactive_selects = [30, 2, 2, 0, 0]
+prefilled_interactive_selects = []
 
 TERMINAL_WIDTH = os.get_terminal_size().columns
 
