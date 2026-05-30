@@ -1,3 +1,6 @@
 venv/
 __pycache__/
 *.pyc
+connect-test.py
+module_import.py
+log.py
