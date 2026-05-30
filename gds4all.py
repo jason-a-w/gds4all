@@ -1,29 +1,12 @@
 import xml.etree.ElementTree as ET
 import sys, glob, os, textwrap, argparse
-from data_types import Conversion, ConversionSimple, ConversionBitfieldEnum, ConversionType, CurrentDataNode, RequestNode, ActuationTestNode, Dtc, DtcFunction, SupportedFunction, Protocol, CommunicationSetup
+from data_types import _get, get_from_collection, get_message, get_lookup_table, Module, load_collections, load_messages, Conversion, ConversionSimple, ConversionBitfieldEnum, ConversionType, CurrentDataNode, RequestNode, ActuationTestNode, Dtc, DtcFunction, SupportedFunction, Protocol, CommunicationSetup
 
 # used for debugging. set sys.argv to, say, 26, 3, 1. 
 # a 2006 2.0 tiburon will be selected: vehicle 26, year 3, variant 1
-prefilled_interactive_selects = []
+prefilled_interactive_selects = [30, 2, 2, 0, 0]
 
 TERMINAL_WIDTH = os.get_terminal_size().columns
-
-messages = {}
-collections = {}
-
-def _get (xml, param: str, default = None, cast_to = None, cast_args: tuple = None) -> str | None:
-	value = xml.get(param, default)
-	
-	if value == '':
-		return default
-
-	if cast_to:
-		try:
-			value = cast_to(value, *cast_args)
-		except (TypeError, ValueError) as e:
-			value = None
-	
-	return value
 
 def _print (*args, indent: int = 0, **kwargs):
 	return print(' '*indent, *args, **kwargs)
@@ -60,20 +43,6 @@ def load_vehicles ():
 
 	return vehicles
 
-def load_messages (dataset: str):
-	tree = ET.parse(dataset).getroot()
-	for keyvalue in tree:
-		if keyvalue.attrib['attr'] not in messages:
-			messages[keyvalue.attrib['attr']] = {}
-		messages[keyvalue.attrib['attr']][keyvalue.attrib['key']] = keyvalue.attrib['desc']
-
-def load_collections (dataset: str):
-	tree = ET.parse(dataset).getroot()
-
-	for collection in tree:
-		collections[collection.tag] = {}
-		for keyvalue in collection:
-			collections[collection.tag][keyvalue.attrib['key']] = keyvalue.attrib['desc']
 
 def load_ecu (ecu_code: str):
 	print('Loading ECU code: {}'.format(ecu_code))
@@ -100,33 +69,6 @@ def load_ecu (ecu_code: str):
 			print('Loaded ECU using pattern: {}'.format(name))
 			return root
 	return None
-
-def get_message (key: int, attribute: str = None):
-	try:
-		return messages[attribute][key]
-	except KeyError:
-		return ''
-
-def get_from_collection (key: str, collection_name: str = 'currentdata'):
-	try:
-		return collections[collection_name][key]
-	except KeyError:
-		return ''
-
-def get_lookup_table (identifier: int) -> list|None:
-	lut_filenames = [f'Lut/{identifier}.lut', f'Lut/{identifier}.LUT'] # consistency [cool]
-	values = []
-
-	for lut_filename in lut_filenames:
-		try:
-			with open(lut_filename, 'r') as f:
-				for value in f.readlines():
-					values.append(value.lstrip().rstrip())
-			return values
-		except FileNotFoundError:
-			pass
-	return None
-
 
 def handle_step (bus, step):
 	print('Step #{}'.format(step.attrib['stepno']))
@@ -157,6 +99,62 @@ def handle_step (bus, step):
 				print('    - If this data {} {}, then we jump to step {}'.format(operation_name, comcode.attrib['code'], comcode.attrib['jumpstep']))
 
 	return False
+
+def print_module(module, ecu_element):
+	print('=== Communication ===')
+	_print('{}'.format(module.communication_setup), indent=4)
+
+	print('\n=== This ECU supports the following functions: ===')
+	for function_declaration in module.communication_setup.supported_functions:
+			_print('- {} ({})'.format(function_declaration.description, function_declaration.index), indent=4)
+
+	_print('\n=== Current data function ===')
+	for data_node in [v for k, v in sorted(module.current_data.items())]:
+		_print('- {}: ({})'.format(data_node.name, data_node.index), indent=4)
+		_print('Payload: {}'.format(data_node.request_payload), indent=8)
+		_print('Response format: {}'.format(data_node.response_prefix), indent=8)
+		
+		if data_node.unit:
+			_print('Unit: {}'.format(data_node.unit), indent=8)
+		_print('Position: {} Size: {}'.format(data_node.position, data_node.size), indent=8)
+		_print('Precision: {}'.format(data_node.decimal_points), indent=8)
+		_print('Conversion: {}'.format(data_node.conversion), indent=8)
+		print()
+	
+	print('=== Actuation test function ===')
+	for test_node in module.actuation_tests:
+		_print(str(test_node), indent=8)
+
+	print('\n=== DTCS: ===')
+	for dtc in module.dtcs:
+		wrapped = textwrap.wrap(str(dtc), width=TERMINAL_WIDTH - 20)
+		for line in wrapped:
+			_print(line, indent=8)
+	
+	# TODO: addfunctions not yet modeled in Module - using raw XML for now
+	print('\n=== "addfunction" functions: ===')
+	addfunction_functions = ecu_element.findall('addfunction')
+	for key, node in enumerate(addfunction_functions):
+		_print('[{}] {}'.format(key, get_message(node.get('fuctionindex'), attribute='index')), indent=8)
+		_print('{}'.format(get_message(node.get('fuctiondesc'), attribute='fuctiondesc')), indent=12)
+		_print('Steps:', indent=12)
+		for step in sorted(node.findall('step'), key=lambda s: int(_get(s, 'stepno'))):
+			_print('#{} {}'.format(_get(step, 'stepno'), get_message(_get(step, 'stepdesc'), attribute='stepdesc')), indent=16)
+			message = step.findall('message')[0]
+			if (message.get('messageindex') != '0'):
+				message_text = get_message(message.get('messageindex'), attribute='messageindex')
+				message_lines = message_text.split('\\n')
+				for i, line in enumerate(message_lines):
+					try:
+						if line == '' and message_lines[i+1] == '':
+							continue
+					except IndexError:
+						pass
+
+					line = line.strip().replace('\n', '')
+
+					for line in textwrap.wrap(line, width=(TERMINAL_WIDTH-20)):
+						_print('{}'.format(line), indent=20)
 
 def main(args):
 	print('loading messages..')
@@ -213,220 +211,26 @@ def main(args):
 
 	for ecu_node in vehicle_system:
 		ecu_code = ecu_node.attrib['ecucode']
-		ecu = load_ecu(ecu_code)
+		ecu_element = load_ecu(ecu_code)
 
-		if ecu == None:
+		if ecu_element is None:
 			print('[!] Failed to load ECU definition: {}'.format(ecu_code))
 			continue
 
-		print('\nLoaded ECU: {}, definition last modified: {}'.format(ecu.get('systemid'), ecu.get('date')))
-
-		print('=== Communication ===')
-
-		commset = ecu.findall('commset')[0]
-		print('    Protocol used: {}'.format(get_message(commset.get('protocolid'), 'protocolid')))
-		try:
-			protocol = Protocol(int(_get(commset, 'protocolid'), 16))
-		except ValueError as e:
-			protocol = None
-			print(e)
-			continue
-
-
-		# what the fuck is wrong with them?
-		tester_id = _get(commset, 'testerid', cast_to=int, cast_args=(16,))#.lstrip().split(' ')[0]
-		module_id = _get(commset, 'moduleid', cast_to=int, cast_args=(16,))#.lstrip().split(' ')[0]
-		inferred_tester_id = None
-		inferred_module_id = None
+		module = Module.from_xml(ecu_element)
 		
-		if tester_id is None and protocol in (Protocol.CAN, Protocol.ISO_15765):
-			for requestnode in commset.findall('startcomm/requestnode'):
-				if (requestnode.attrib['request'] != ''):
-					inferred_tester_id = int(requestnode.attrib['request'][1:4], 16)
-					inferred_module_id = int(requestnode.attrib['response'][1:4], 16)
-					break
 		
-		tx_id = tester_id if tester_id is not None else inferred_tester_id
-		rx_id = module_id if tester_id is not None else inferred_module_id
-
-		communication_setup = CommunicationSetup(
-			tx_id=tx_id,
-			rx_id=rx_id,
-			vss_channel=_get(commset, 'vsschannel'),
-			protocol=protocol,
-			supported_functions=[
-				SupportedFunction(
-					index=_get(x, 'index'), 
-					description=get_message(_get(x, 'index'), attribute='index')
-				) for x in commset.findall('funcsupport')[0]
-			]
-		)
-		_print('{}'.format(communication_setup), indent=4)
-
-		for requestnode in commset.findall('startcomm/requestnode'):
-			if (requestnode.attrib['request'] != ''):
-				_print('Connect payload: {}'.format(requestnode.attrib['request']), indent=4)
-				_print('Expected response: {}'.format(requestnode.attrib['response']), indent=4)
-
-		print('\n=== This ECU supports following functions: ===')
-		for function_declaration in communication_setup.supported_functions:
-			_print('- {} ({})'.format(function_declaration.description, function_declaration.index), indent=4)
-
-		_print('=== Current data function ===', indent=4)
-		current_data_nodes = {}
-		for node in ecu.findall('currentdata/currentdatanode'):
-			convrule = node.findall('convrule')[0]
-			try:
-				convtype = ConversionType(int(_get(convrule, 'convtype')))
-			except ValueError as e:
-				print(e)
-				continue
-
-			if convtype == ConversionType.SIMPLE:
-				add = float(_get(convrule, 'B', '0'))
-				if add != 0:
-					add = add * -1 # invert the value as GDS defs use subtraction
-				conversion = ConversionSimple(
-					factor=float(_get(convrule, 'A')), 
-					add=add
-				)
-			elif convtype == ConversionType.SIMPLE_NO_ADD:
-				conversion = ConversionSimple(
-					factor=float(_get(convrule, 'A')),
-				)
-			elif convtype == ConversionType.BITFIELD_ENUM:
-				values = get_lookup_table(_get(convrule, 'A'))
-				if not values:
-					_print('Failed to load LUT', indent=8)
-					values = []
-
-				conversion = ConversionBitfieldEnum(
-					add=float(_get(convrule, 'B', '0')),
-					shift=int(_get(convrule, 'C')),
-					bitmask=int(_get(convrule, 'D'), 16),
-					values=values
-				)
-
-			data_node = CurrentDataNode(
-				index=_get(node, 'index'),
-				name=get_from_collection(_get(node, 'index'), 'currentdata'),
-
-				request_payload=_get(node, 'requestcode'),
-				response_prefix=_get(node, 'response'),
-				response_start_position=_get(node, 'startpos'),
-
-				position=_get(node, 'realpos', int),
-				size=int(_get(node, 'datasize')),
-				data_type=_get(node, 'datatype'),
-				min_value=int(_get(node, 'minvalue'), 16),
-				max_value=int(_get(node, 'maxvalue'), 16),
-				unit=get_message(_get(node, 'unit'), attribute='unit'),
-				decimal_points=_get(node, 'floatrange', int),
-				conversion=conversion
+		for dtc in module.dtcs:
+			dtc.description = (
+				get_from_collection(dtc.index, 'dtc')
+				or get_from_collection(dtc.header, 'dtc')
+				or 'No description found'
 			)
-
-			current_data_nodes[int(data_node.position)] = data_node
-
-
-		for data_node in [v for k, v in sorted(current_data_nodes.items())]:
-			_print('- {}: ({})'.format(data_node.name, data_node.index), indent=8)
-			_print('Payload: {}'.format(data_node.request_payload), indent=12)
-			_print('Response format: {}'.format(data_node.response_prefix), indent=12)
-			
-
-			
-			if (_get(node, 'unit', 0, int) != 0):
-				_print('Unit: {} ({})'.format(data_node.unit, node.get('unit')), indent=12)
-			_print('Position: {} Size: {}'.format(data_node.position, data_node.size), indent=12)
-			_print('Precision: {}'.format(data_node.decimal_points), indent=12)
-			_print('Conversion: {} ({})'.format(data_node.conversion, convtype), indent=12)
-
-			print()
-
-		_print('=== Actuation test function ===', indent=4)
-		for node in ecu.findall('actuationtest/actuationtestnode'):
-			try:
-				start_request = RequestNode.from_xml(node.findall('starttest')[0][0])
-			except IndexError:
-				start_request = None
-
-			try:
-				stop_request = RequestNode.from_xml(node.findall('stoptest')[0][0])
-			except IndexError:
-				stop_request = None
-
-			try:
-				end_request = RequestNode.from_xml(node.findall('endtest')[0][0])
-			except IndexError:
-				end_request = None
-
-			test_node = ActuationTestNode(
-				index=_get(node, 'index', int),
-				name=get_from_collection(_get(node, 'index'), 'actuationtest'),
-
-				start_condition=get_from_collection(_get(node, 'actuationtestcondition'), 'actuationtest'),
-				stop_condition=get_from_collection(_get(node, 'stopcondition'), 'actuationtest'),
-				request_condition=get_from_collection(_get(node, 'requestcondition'), 'actuationtest'),
-
-				time=_get(node, 'actuationtesttime', int),
-				request_time=_get(node, 'requesttime', int),
-
-				start_request=start_request,
-				stop_request=stop_request,
-				end_request=end_request,
-
-			)
-			_print(str(test_node), indent=8)
-			_print('Start payload: {}'.format(test_node.start_request.request_payload), indent=12)
-
-		print('\n    === DTCs: ===')
-		for node in ecu.findall('dtc'):
-			dtc_func = DtcFunction(
-				requests=[
-					RequestNode.from_xml(x) for x in node.findall('requestcodetree')[0].findall('requestnode')
-				],
-				dtcs=[
-					Dtc.from_xml(x) for x in node.findall('dtcitemtree')
-				]
-			)
-
-			for dtc in dtc_func.dtcs:
-				dtc.description = (
-					collections['dtc'].get(dtc.index)
-					or collections['dtc'].get(dtc.header)
-					or 'No description found'
-				)
-
-			_print('Request: {}'.format(dtc_func.requests[0]), indent=8)
-			for dtc in dtc_func.dtcs:
-				_print('{}'.format(str(dtc)), indent=8)
-
-
-		print('\n    === "addfunction" functions: ===')
-		addfunction_functions = ecu.findall('addfunction')
-		for key, node in enumerate(addfunction_functions):
-			_print('[{}] {}'.format(key, get_message(node.get('fuctionindex'), attribute='index')), indent=8)
-			_print('{}'.format(get_message(node.get('fuctiondesc'), attribute='fuctiondesc')), indent=12)
-			_print('Steps:', indent=12)
-			for step in sorted(node.findall('step'), key=lambda s: int(_get(s, 'stepno'))):
-				_print('#{} {}'.format(_get(step, 'stepno'), get_message(_get(step, 'stepdesc'), attribute='stepdesc')), indent=16)
-				message = step.findall('message')[0]
-				if (message.get('messageindex') != '0'):
-					message_text = get_message(message.get('messageindex'), attribute='messageindex')
-					message_lines = message_text.split('\\n')
-					for i, line in enumerate(message_lines):
-						try:
-							if line == '' and message_lines[i+1] == '':
-								continue
-						except IndexError:
-							pass
-
-						line = line.strip().replace('\n', '')
-
-						# make sure no line is crossing the indent, i hate that
-						for line in textwrap.wrap(line, width=(TERMINAL_WIDTH-20)):
-							_print('{}'.format(line), indent=20)
-					
+		for sf in module.communication_setup.supported_functions:
+			sf.description = get_message(sf.index, attribute='index')
+		
+	
+		print_module(module, ecu_element)
 
 		_stephandlingmethods = '''continue # ACHTUNG!
 		selected_function = interactive_select(addfunction_functions, 'Select function: ')
