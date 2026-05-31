@@ -12,6 +12,28 @@ def load_arguments():
     parser.add_argument('--interface', default='can0', help='CAN interface name (default: can0)')
     return parser.parse_args()
 
+def resolve_dtc_descriptions(dtcs, module):
+    dtc_table = collections.get('dtc', {})
+    module_dtcs = {}
+    
+    for module_dtc in module.dtcs:
+        module_dtcs[module_dtc.header] = module_dtc.index
+    
+    for dtc in dtcs:
+        if dtc.description is not None:
+            continue 
+        if dtc.header in module_dtcs:
+            dtc.index = module_dtcs[dtc.header]
+        try:
+            dtc.description = dtc_table[dtc.index]
+        # Try suffixed variants
+        except (KeyError):
+            for key, desc in dtc_table.items():
+                if key.startswith(dtc.header + '-'):
+                    dtc.description = desc
+                    break
+    return dtcs
+
 def main():
     args = load_arguments()
     if args.interactive_select:
@@ -36,23 +58,10 @@ def main():
         connection.connect()
         print('Reading DTCs...')
         dtcs = connection.read_dtcs()
-
-        # Resolve descriptions
-        dtc_table = collections.get('dtc', {})
-        for dtc in dtcs:
-            if dtc.description is not None:
-                continue 
-            if dtc.header in dtc_table:
-                dtc.description = dtc_table[dtc.header]
-                continue
-            # Try suffixed variants
-            for key, desc in dtc_table.items():
-                if key.startswith(dtc.header + '-'):
-                    dtc.description = desc
-                    break
+        dtcs_with_descriptions = resolve_dtc_descriptions(dtcs, module)
 
         print(f'\n{len(dtcs)} DTC(s) found:')
-        for dtc in dtcs:
+        for dtc in dtcs_with_descriptions:
             print(f'  {dtc.header}: {dtc.description or "(unknown code)"}')
 
     finally:
