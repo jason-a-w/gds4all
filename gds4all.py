@@ -102,112 +102,6 @@ def print_module(module, ecu_element):
 					for line in textwrap.wrap(line, width=(TERMINAL_WIDTH-20)):
 						_print('{}'.format(line), indent=20)
 
-def main(args):
-	print('loading messages..')
-	load_messages('decrypted_xef/add-ENG.xml')
-	load_messages('decrypted_xef/keyvalue.xml')
-	load_messages('decrypted_xef/keyvalueUnit.xml') 
-
-	print('loading collections..')
-	load_collections('decrypted_xef/dtc-ENG.xml')
-
-	if not os.path.isdir('Lut'):
-		print('[!] Lookup table files not found, enum values won\'t be extracted.')
-		print('You can find them in the Lut directory in main GDS dir')
-
-	print('loading vehicles..')
-
-	vehicles = load_vehicles(args.kia)
-
-	for key, vehicle in enumerate(vehicles):
-		print('[{}] - {}'.format(key, vehicle.get('modeldesc')))
-
-	vehicle = interactive_select(vehicles, 'Select vehicle: ')
-	print('selected vehicle: {}'.format(vehicle.get('modeldesc')))
-
-	# manufacturer, lang, vehicle type, model vin
-	vehicle_years = vehicle[0][0][0][0][0]
-	
-	for key, vehicle_year in enumerate(vehicle_years):
-		print('[{}] - {}'.format(key, vehicle_year.get('modelyr')))
-
-	vehicle_variants = interactive_select(vehicle_years, 'Select year: ')
-
-	for key, variant in enumerate(vehicle_variants):
-		print('[{}] - {}'.format(key, variant.get('enginedesc')))
-
-	vehicle_systems = interactive_select(vehicle_variants, 'Select engine type: ')
-
-	for key, system in enumerate(vehicle_systems):
-		print('\n[{}] - {}'.format(key, system.get('sysitemdesc')))
-		print('    {}'.format('/'.join([subsystem.get('syssubitemdesc') for subsystem in system])))
-
-	vehicle_system = interactive_select(vehicle_systems, 'Select system: ')
-	
-	if (len(vehicle_system) > 1):
-		for key, subsystem in enumerate(vehicle_system):
-			print('[{}] {}'.format(key, subsystem.get('syssubitemdesc')))
-		vehicle_system = interactive_select(vehicle_system, 'Select subsystem: ')
-	else:
-		vehicle_system = vehicle_system[0]
-
-	print('\n\n\nSelected system: {}'.format(vehicle_system.get('syssubitemdesc')))
-	if len(vehicle_system) > 1:
-		print('There is more than one ECU assigned to this subsystem: {}'.format(', '.join([ecu.get('ecucode') for ecu in vehicle_system])))
-
-	for ecu_node in vehicle_system:
-		ecu_code = ecu_node.attrib['ecucode']
-		ecu_element = load_ecu(ecu_code)
-
-		if ecu_element is None:
-			print('[!] Failed to load ECU definition: {}'.format(ecu_code))
-			continue
-
-		module = Module.from_xml(ecu_element)
-		
-		
-		for dtc in module.dtcs:
-			dtc.description = (
-				get_from_collection(dtc.index, 'dtc')
-				or get_from_collection(dtc.header, 'dtc')
-				or 'No description found'
-			)
-		for sf in module.communication_setup.supported_functions:
-			sf.description = get_message(sf.index, attribute='index')
-		
-	
-		print_module(module, ecu_element)
-
-		_stephandlingmethods = '''continue # ACHTUNG!
-		selected_function = interactive_select(addfunction_functions, 'Select function: ')
-
-		print('\n\n\n==========')
-		print(get_message(selected_function.attrib['fuctiondesc'], attribute='fuctiondesc'))
-
-		function_steps = sorted(selected_function.findall('step'), key=lambda s: int(s.attrib['stepno']))
-		next_step_no = handle_step(bus, function_steps[0])
-		while next_step_no:
-			try:
-				next_step = function_steps[next_step_no-1]
-				next_step_no = handle_step(bus, next_step)
-				if (next_step_no == 0):
-					break
-			except (IndexError, KeyError):
-				break'''
-
-	if (len(vehicle_system) > 1):
-		print('[!] Be advised: more than 1 ECU definition was processed and displayed')
-
-if __name__ == '__main__':
-	args = load_arguments()
-	if args.interactive_select:
-		print(f'Setting prefilled selects to: {args.interactive_select}')
-		import xml.etree.ElementTree as ET
-import os, textwrap, argparse
-from data_types import Module
-from utils import _get, get_from_collection, get_message, load_collections, load_messages
-from selection import interactive_select, load_vehicles, load_ecu, set_prefilled_selects
-
 TERMINAL_WIDTH = os.get_terminal_size().columns
 
 def load_arguments():
@@ -404,7 +298,6 @@ def main(args):
 
 if __name__ == '__main__':
 	args = load_arguments()
-	print(f'DEBUG args: {args}')
 	if args.interactive_select:
 		print(f'Setting prefilled selects to: {args.interactive_select}')
 		set_prefilled_selects(args.interactive_select)
