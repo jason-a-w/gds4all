@@ -1,74 +1,20 @@
 import xml.etree.ElementTree as ET
-import sys, glob, os, textwrap, argparse
+import os, textwrap, argparse
 from data_types import Module
 from utils import _get, get_from_collection, get_message, load_collections, load_messages
-# used for debugging. set sys.argv to, say, 26, 3, 1. 
-# a 2006 2.0 tiburon will be selected: vehicle 26, year 3, variant 1
-prefilled_interactive_selects = []
+from selection import interactive_select, load_vehicles, load_ecu, set_prefilled_selects
 
 TERMINAL_WIDTH = os.get_terminal_size().columns
 
+def load_arguments():
+    parser = argparse.ArgumentParser(description='Scan DTCs from a Hyundai ECU')
+    parser.add_argument('-i', '--interactive-select', nargs='*', help='Prefill selections with indices', type=int, metavar='N')
+    parser.add_argument('-k', '--kia', help='Use KIA vehicles', action='store_true')
+    parser.add_argument('--interface', default='can0', help='CAN interface name (default: can0)')
+    return parser.parse_args()
+
 def _print (*args, indent: int = 0, **kwargs):
 	return print(' '*indent, *args, **kwargs)
-	
-def interactive_select (table, prompt):
-	if (len(prefilled_interactive_selects) > 0):
-		index = int(prefilled_interactive_selects.pop(0))
-		print('Prefilled: {}'.format(index))
-		return table[index]
-
-	try:
-		return table[int(input(prompt))]
-	except (KeyError, IndexError, ValueError):
-		print('Invalid choice! Try again')
-		return interactive_select(table, prompt)
-
-def load_arguments ():
-	parser = argparse.ArgumentParser(description='GDS4ALL - Parser for Hyundai GDS definitions')
-	parser.add_argument('-i', '--interactive-select', nargs='*', help='Prefill selections with indices', type=int, metavar='N')
-	parser.add_argument('-k', '--kia', help='Use KIA vehicles', action='store_true')
-	args = parser.parse_args()
-	return args
-
-def load_vehicles ():
-	if args.kia:
-		tree = ET.parse('decrypted_xef/vehiclesdata_KME.xml')
-	else:
-		tree = ET.parse('decrypted_xef/vehiclesdata_HME.xml')
-	root = tree.getroot()
-	vehicles = []
-
-	for child in root:
-		vehicles.append(child)
-
-	return vehicles
-
-
-def load_ecu (ecu_code: str):
-	print('Loading ECU code: {}'.format(ecu_code))
-	patterns = {'Exact Match': 'decrypted_xef/{}.xml', 
-			   'Largest DGN Suffix File': 'decrypted_xef/{}[DGN]0.xml', 
-			   'Wildcard': 'decrypted_xef/{}*.xml'}
-	for name, pattern in patterns.items():
-		files = glob.glob(pattern.format(ecu_code))
-		if len(files) == 0:
-			continue
-		elif len(files) == 1:
-			file = files[0]
-		else:
-			file = max(files, key=lambda file: os.stat(file).st_size)
-		try:
-			tree = ET.parse(file)
-		except ET.ParseError:
-			print('File {} was found but failed to parse'.format(file))
-			continue
-		root = tree.getroot()
-		if len(root) == 0:
-			print('File {} was found but apparently contains no root'.format(file))
-		else:
-			print('Loaded ECU using pattern: {}'.format(name))
-			return root
-	return None
 
 def handle_step (bus, step):
 	print('Step #{}'.format(step.attrib['stepno']))
@@ -171,7 +117,7 @@ def main(args):
 
 	print('loading vehicles..')
 
-	vehicles = load_vehicles()
+	vehicles = load_vehicles(args.kia)
 
 	for key, vehicle in enumerate(vehicles):
 		print('[{}] - {}'.format(key, vehicle.get('modeldesc')))
@@ -255,5 +201,6 @@ def main(args):
 if __name__ == '__main__':
 	args = load_arguments()
 	if args.interactive_select:
-		prefilled_interactive_selects = args.interactive_select
+		print(f'Setting prefilled selects to: {args.interactive_select}')
+		set_prefilled_selects(args.interactive_select)
 	main(args)
